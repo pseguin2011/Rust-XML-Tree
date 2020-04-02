@@ -40,17 +40,17 @@ impl XMLElement {
 /// 
 /// ## Returns
 /// A HashMap of xml elements representing a tree of elements
-pub fn parse_xml_content(xml_content: &str) -> HashMap<String, XMLElement>{
+pub fn parse_xml_content(xml_content: &str) -> XMLElement{
     let buffer = BufReader::new(xml_content.as_bytes());
     let parser = EventReader::new(buffer);
     let mut xml = parser.into_iter();
     let mut xml_elements: HashMap<String, XMLElement> = HashMap::new();
     while let Some(Ok(current)) = xml.next() {
         if let Some(first_tag) = get_starting_tag(&current) {
-            xml_elements.insert(first_tag.into(), get_next_tag(&mut xml, first_tag));
+            xml_elements.insert(first_tag.into(), get_inner_tag(&mut xml, first_tag));
         }
     }
-    xml_elements
+    XMLElement{ value: None, inner_elements: xml_elements }
 }
 
 /// Iterates through the inner elements of the XML content:
@@ -65,7 +65,7 @@ pub fn parse_xml_content(xml_content: &str) -> HashMap<String, XMLElement>{
 /// 
 /// ## Returns
 /// The currently being searched XML element
-fn get_next_tag<R: Read>(
+fn get_inner_tag<R: Read>(
     mut xml: &mut Events<R>,
     searched_tag: &str,
 ) -> XMLElement {
@@ -75,7 +75,7 @@ fn get_next_tag<R: Read>(
         if let xml::reader::XmlEvent::Characters(v) = &current {
             value = Some(v.into());
         } else if let Some(item) = get_starting_tag(&current) {
-            inner_elements.insert(item.into(), get_next_tag(&mut xml, item));
+            inner_elements.insert(item.into(), get_inner_tag(&mut xml, item));
         }
         if is_ending_tag(searched_tag, &current) {
             break;
@@ -110,4 +110,40 @@ fn is_ending_tag(tag_name: &str, element: &XmlEvent) -> bool {
         } => tag == tag_name,
         _ => false,
     }
+}
+
+#[test]
+fn verify_tags_order() {
+    let xml_content = "<I><J><K>M</K></J></I>";
+    let buffer = BufReader::new(xml_content.as_bytes());
+    let parser = EventReader::new(buffer);
+    let mut xml = parser.into_iter();
+    xml.next();
+    assert_eq!(Some("I"), get_starting_tag(&xml.next().unwrap().unwrap()));
+    assert_eq!(Some("J"), get_starting_tag(&xml.next().unwrap().unwrap()));
+    assert_eq!(Some("K"), get_starting_tag(&xml.next().unwrap().unwrap()));
+    xml.next();
+    assert!(is_ending_tag("K", &xml.next().unwrap().unwrap()));
+    assert!(is_ending_tag("J", &xml.next().unwrap().unwrap()));
+    assert!(is_ending_tag("I", &xml.next().unwrap().unwrap()));
+}
+
+#[test]
+fn search_for_inner_tag() {
+    let xml_content = "\
+    <I></I>\
+    <L>
+        <I>M</I>\
+    </L>\
+    <J></J>";
+    let buffer = BufReader::new(xml_content.as_bytes());
+    let parser = EventReader::new(buffer);
+    let mut xml = parser.into_iter();
+    xml.next();
+    xml.next();
+    assert!(get_inner_tag(&mut xml, "I").inner_elements.is_empty());
+    xml.next();
+    assert!(get_inner_tag(&mut xml, "L").inner_elements.contains_key("I"));
+    xml.next();
+    assert!(get_inner_tag(&mut xml, "J").inner_elements.is_empty());
 }
